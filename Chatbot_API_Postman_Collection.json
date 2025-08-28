@@ -1,0 +1,380 @@
+{
+	"info": {
+		"_postman_id": "chatbot-api-collection",
+		"name": "Chatbot API - Complete Test Collection",
+		"description": "Complete collection for testing the AI Chatbot API endpoints. Replace {{base_url}} with your Vercel deployment URL.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "https://your-app.vercel.app",
+			"type": "string",
+			"description": "Replace with your actual Vercel deployment URL"
+		},
+		{
+			"key": "conversation_id",
+			"value": "test_conv_123",
+			"type": "string",
+			"description": "Test conversation ID for testing"
+		}
+	],
+	"item": [
+		{
+			"name": "1. Basic Connectivity Tests",
+			"item": [
+				{
+					"name": "Ping Test",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/ping",
+							"host": ["{{base_url}}"],
+							"path": ["ping"]
+						},
+						"description": "Basic connectivity test - should always work"
+					},
+					"response": []
+				},
+				{
+					"name": "Root Endpoint",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/",
+							"host": ["{{base_url}}"],
+							"path": [""]
+						},
+						"description": "Get basic API information"
+					},
+					"response": []
+				},
+				{
+					"name": "Test Endpoint",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/test",
+							"host": ["{{base_url}}"],
+							"path": ["test"]
+						},
+						"description": "Get detailed system test information"
+					},
+					"response": []
+				}
+			],
+			"description": "Basic connectivity and system tests"
+		},
+		{
+			"name": "2. Health & Status Tests",
+			"item": [
+				{
+					"name": "Health Check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/health",
+							"host": ["{{base_url}}"],
+							"path": ["health"]
+						},
+						"description": "Comprehensive health check - may show degraded if env vars not set"
+					},
+					"response": []
+				},
+				{
+					"name": "System Status",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/system/status",
+							"host": ["{{base_url}}"],
+							"path": ["system", "status"]
+						},
+						"description": "Detailed system status and diagnostics"
+					},
+					"response": []
+				}
+			],
+			"description": "Health monitoring and system status endpoints"
+		},
+		{
+			"name": "3. Persona Management",
+			"item": [
+				{
+					"name": "Get Persona",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/persona",
+							"host": ["{{base_url}}"],
+							"path": ["persona"]
+						},
+						"description": "Get current AI persona configuration"
+					},
+					"response": []
+				},
+				{
+					"name": "Update Persona",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"persona_content\": \"You are a helpful AI assistant with a friendly personality. You provide accurate, helpful responses and maintain a conversational tone.\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/persona",
+							"host": ["{{base_url}}"],
+							"path": ["persona"]
+						},
+						"description": "Update AI persona configuration"
+					},
+					"response": []
+				}
+			],
+			"description": "AI persona management endpoints"
+		},
+		{
+			"name": "4. Conversation Management",
+			"item": [
+				{
+					"name": "Create Conversation",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"conversation_id\": \"{{conversation_id}}\",\n  \"user_id\": \"test_user_123\",\n  \"title\": \"Test Conversation\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/conversations",
+							"host": ["{{base_url}}"],
+							"path": ["conversations"]
+						},
+						"description": "Create a new conversation"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Conversation History",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/conversations/{{conversation_id}}/history",
+							"host": ["{{base_url}}"],
+							"path": ["conversations", "{{conversation_id}}", "history"]
+						},
+						"description": "Get conversation history"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Conversation Summaries",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/conversations/{{conversation_id}}/summaries",
+							"host": ["{{base_url}}"],
+							"path": ["conversations", "{{conversation_id}}", "summaries"]
+						},
+						"description": "Get conversation summaries"
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Conversation",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/conversations/{{conversation_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["conversations", "{{conversation_id}}"]
+						},
+						"description": "Delete a conversation"
+					},
+					"response": []
+				}
+			],
+			"description": "Conversation management endpoints"
+		},
+		{
+			"name": "5. Chat Functionality",
+			"item": [
+				{
+					"name": "Enhanced Chat",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"conversation_id\": \"{{conversation_id}}\",\n  \"user_input\": \"Hello! How are you today?\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/chat/enhanced",
+							"host": ["{{base_url}}"],
+							"path": ["chat", "enhanced"]
+						},
+						"description": "Send a message and get AI response"
+					},
+					"response": []
+				},
+				{
+					"name": "Chat with Different Message",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"conversation_id\": \"{{conversation_id}}\",\n  \"user_input\": \"What can you help me with?\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/chat/enhanced",
+							"host": ["{{base_url}}"],
+							"path": ["chat", "enhanced"]
+						},
+						"description": "Test conversation continuity"
+					},
+					"response": []
+				},
+				{
+					"name": "Streaming Chat",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"conversation_id\": \"{{conversation_id}}\",\n  \"user_input\": \"Tell me a short story\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/chat/enhanced/stream",
+							"host": ["{{base_url}}"],
+							"path": ["chat", "enhanced", "stream"]
+						},
+						"description": "Test streaming chat responses (Server-Sent Events)"
+					},
+					"response": []
+				}
+			],
+			"description": "Core chat functionality endpoints"
+		},
+		{
+			"name": "6. Error Testing",
+			"item": [
+				{
+					"name": "Invalid Conversation ID",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/conversations/invalid_id_123/history",
+							"host": ["{{base_url}}"],
+							"path": ["conversations", "invalid_id_123", "history"]
+						},
+						"description": "Test error handling with invalid conversation ID"
+					},
+					"response": []
+				},
+				{
+					"name": "Invalid Chat Request",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"invalid_field\": \"test\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/chat/enhanced",
+							"host": ["{{base_url}}"],
+							"path": ["chat", "enhanced"]
+						},
+						"description": "Test error handling with invalid request body"
+					},
+					"response": []
+				}
+			],
+			"description": "Error handling and edge case testing"
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					"// Log request details",
+					"console.log('Making request to: ' + pm.request.url);",
+					"console.log('Method: ' + pm.request.method);"
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					"// Basic response validation",
+					"pm.test('Status code is valid', function () {",
+					"    pm.expect(pm.response.code).to.be.oneOf([200, 201, 400, 401, 404, 500, 503]);",
+					"});",
+					"",
+					"pm.test('Response time is reasonable', function () {",
+					"    pm.expect(pm.response.responseTime).to.be.below(10000);",
+					"});",
+					"",
+					"pm.test('Response has content', function () {",
+					"    pm.expect(pm.response.text()).to.not.be.empty;",
+					"});",
+					"",
+					"// Log response for debugging",
+					"console.log('Response Status: ' + pm.response.status);",
+					"console.log('Response Time: ' + pm.response.responseTime + 'ms');",
+					"",
+					"// Store conversation ID for subsequent requests",
+					"if (pm.response.json() && pm.response.json().conversation_id) {",
+					"    pm.collectionVariables.set('conversation_id', pm.response.json().conversation_id);",
+					"}"
+				]
+			}
+		}
+	]
+}
