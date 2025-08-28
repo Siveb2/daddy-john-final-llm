@@ -10,6 +10,12 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 # Fallback to SQLite if no DATABASE_URL provided
 if not DATABASE_URL:
     DATABASE_URL = "sqlite:///./chatbot.db"
+else:
+    # Convert postgres:// to postgresql+asyncpg:// for asyncpg compatibility
+    if DATABASE_URL.startswith("postgres://"):
+        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+asyncpg://", 1)
+    elif DATABASE_URL.startswith("postgresql://"):
+        DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
 
 # Create engine with appropriate settings
 if DATABASE_URL.startswith("sqlite"):
@@ -19,7 +25,7 @@ if DATABASE_URL.startswith("sqlite"):
         echo=False
     )
 else:
-    # PostgreSQL/Supabase configuration
+    # PostgreSQL/Supabase configuration with asyncpg
     engine = create_engine(DATABASE_URL, echo=False)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
