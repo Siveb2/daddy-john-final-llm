@@ -50,8 +50,28 @@ class LLMProvider:
         self.api_key = api_key
         self.model = model
     
-    async def generate_response(self, messages: List[Dict]) -> str:
-        raise NotImplementedError
+    # In app/core/chatbot_engine.py, update the generate_response method:
+    async def generate_response(self, db: Session, conversation_id: str, user_input: str) -> Dict:
+        try:
+            # Get conversation history
+            messages = self.context_manager.get_conversation_history(db, conversation_id)
+            
+            # Generate response using the language model
+            response = await self.llm.generate_response(messages)
+            
+            # Calculate token count for the response
+            token_count = max(1, len(response) // 4)
+            
+            return {
+                'response': response,
+                'metadata': {
+                    'token_count': token_count,
+                    'model': self.model_name
+                }
+            }
+        except Exception as e:
+            logger.error(f"Error generating response: {str(e)}", exc_info=True)
+            raise
 
 class OpenAIProvider(LLMProvider):
     """OpenAI API provider"""
@@ -164,11 +184,15 @@ class ContextManager:
         self.max_context_tokens = max_context_tokens
         self.summarize_threshold = summarize_threshold
     
-    def add_message(self, db: Session, conversation_id: str, message: Message) -> None:
-        """Saves a message to the database."""
+# In app/core/chatbot_core.py, update the add_message method in ContextManager class:
+    def add_message(self, db: Session, conversation_id: str, message: Message, token_count: int = None) -> None:
+        """Saves a message to the database with token count."""
         from app.db import crud
-        crud.create_message(db=db, conversation_id=conversation_id, message=message)
-
+        # Calculate token count if not provided (approx 1 token per 4 characters)
+        if token_count is None:
+            token_count = max(1, len(message.content) // 4)
+        crud.create_message(db=db, conversation_id=conversation_id, message=message, token_count=token_count)
+    
     def get_conversation_history(self, db: Session, conversation_id: str) -> List[Message]:
         """Gets full conversation history from the database."""
         from app.db import crud
@@ -250,8 +274,63 @@ Summary:"""
         summary_messages = [{'role': 'user', 'content': summary_prompt}]
         return await self.llm_provider.generate_response(summary_messages)
     
+    # async def process_message(self, db: Session, conversation_id: str, user_input: str) -> Dict:
+    #     """Main message processing pipeline"""
+    #     try:
+    #         if not self.validate_input(user_input):
+    #             return {
+    #                 'success': False,
+    #                 'error': 'Invalid input: message is empty or too long',
+    #                 'response': None
+    #             }
+            
+    #         user_message = Message(role='user', content=user_input)
+    #         self.context_manager.add_message(db, conversation_id, user_message)
+            
+    #         if self.context_manager.should_summarize(db, conversation_id):
+    #             messages_to_summarize = self.context_manager.get_messages_for_summarization(db, conversation_id)
+    #             if messages_to_summarize:
+    #                 summary_text = await self.generate_summary(messages_to_summarize)
+    #                 summary = ConversationSummary(
+    #                     summary_text=summary_text,
+    #                     message_range=(0, len(messages_to_summarize))
+    #                 )
+    #                 self.context_manager.add_summary(db, conversation_id, summary)
+    #                 logger.info(f"Created summary for conversation {conversation_id}")
+            
+    #         message_history, latest_summary = self.context_manager.prepare_context_for_llm(
+    #             db, conversation_id, self.llm_provider
+    #         )
+            
+    #         system_prompt = self.persona_manager.generate_system_prompt(
+    #             summary=latest_summary
+    #         )
+            
+    #         llm_messages = [{'role': 'system', 'content': system_prompt}]
+    #         llm_messages.extend(message_history)
+            
+    #         response = await self.llm_provider.generate_response(llm_messages)
+            
+    #         assistant_message = Message(role='assistant', content=response)
+    #         self.context_manager.add_message(db, conversation_id, assistant_message)
+            
+    #         return {
+    #             'success': True,
+    #             'response': response,
+    #             'summary_created': False,
+    #             'message_count': len(self.context_manager.get_conversation_history(db, conversation_id)),
+    #             'error': None
+    #         }
+            
+    #     except Exception as e:
+    #         logger.error(f"Error processing message: {e}")
+    #         return {
+    #             'success': False,
+    #             'error': str(e),
+    #             'response': None
+    #         }
+# In app/core/chatbot_core.py, update the process_message method in MessageProcessor class:
     async def process_message(self, db: Session, conversation_id: str, user_input: str) -> Dict:
-        """Main message processing pipeline"""
         try:
             if not self.validate_input(user_input):
                 return {
@@ -261,45 +340,25 @@ Summary:"""
                 }
             
             user_message = Message(role='user', content=user_input)
+            # Token count will be calculated in add_message
             self.context_manager.add_message(db, conversation_id, user_message)
             
-            if self.context_manager.should_summarize(db, conversation_id):
-                messages_to_summarize = self.context_manager.get_messages_for_summarization(db, conversation_id)
-                if messages_to_summarize:
-                    summary_text = await self.generate_summary(messages_to_summarize)
-                    summary = ConversationSummary(
-                        summary_text=summary_text,
-                        message_range=(0, len(messages_to_summarize))
-                    )
-                    self.context_manager.add_summary(db, conversation_id, summary)
-                    logger.info(f"Created summary for conversation {conversation_id}")
+            # Process the message and get response
+            response = await self.engine.generate_response(db, conversation_id, user_input)
             
-            message_history, latest_summary = self.context_manager.prepare_context_for_llm(
-                db, conversation_id, self.llm_provider
-            )
-            
-            system_prompt = self.persona_manager.generate_system_prompt(
-                summary=latest_summary
-            )
-            
-            llm_messages = [{'role': 'system', 'content': system_prompt}]
-            llm_messages.extend(message_history)
-            
-            response = await self.llm_provider.generate_response(llm_messages)
-            
-            assistant_message = Message(role='assistant', content=response)
-            self.context_manager.add_message(db, conversation_id, assistant_message)
+            # Save the assistant's response
+            if response and 'response' in response and response['response']:
+                assistant_message = Message(role='assistant', content=response['response'])
+                self.context_manager.add_message(db, conversation_id, assistant_message)
             
             return {
                 'success': True,
-                'response': response,
-                'summary_created': False,
-                'message_count': len(self.context_manager.get_conversation_history(db, conversation_id)),
-                'error': None
+                'response': response.get('response') if response else None,
+                'metadata': response.get('metadata', {}) if response else {}
             }
-            
+
         except Exception as e:
-            logger.error(f"Error processing message: {e}")
+            logger.error(f"Error processing message: {str(e)}", exc_info=True)
             return {
                 'success': False,
                 'error': str(e),
