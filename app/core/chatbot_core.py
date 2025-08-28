@@ -50,6 +50,7 @@ class LLMProvider:
         self.api_key = api_key
         self.model = model
     
+    # In app/core/chatbot_engine.py, update the generate_response method:
     async def generate_response(self, db: Session, conversation_id: str, user_input: str) -> Dict:
         try:
             # Get conversation history
@@ -183,6 +184,7 @@ class ContextManager:
         self.max_context_tokens = max_context_tokens
         self.summarize_threshold = summarize_threshold
     
+# In app/core/chatbot_core.py, update the add_message method in ContextManager class:
     def add_message(self, db: Session, conversation_id: str, message: Message, token_count: int = None) -> None:
         """Saves a message to the database with token count."""
         from app.db import crud
@@ -201,7 +203,7 @@ class ContextManager:
         """Checks if conversation should be summarized based on DB count."""
         from app.db import crud
         count = crud.get_user_assistant_message_count(db=db, conversation_id=conversation_id)
-        return count >= self.summarize_threshold and (count % self.summarize_threshold == 0 or count == self.summarize_threshold)
+        return count > 0 and count % self.summarize_threshold == 0
 
     def get_messages_for_summarization(self, db: Session, conversation_id: str) -> List[Message]:
         """Gets the last messages for summarization from the database."""
@@ -272,8 +274,63 @@ Summary:"""
         summary_messages = [{'role': 'user', 'content': summary_prompt}]
         return await self.llm_provider.generate_response(summary_messages)
     
+    # async def process_message(self, db: Session, conversation_id: str, user_input: str) -> Dict:
+    #     """Main message processing pipeline"""
+    #     try:
+    #         if not self.validate_input(user_input):
+    #             return {
+    #                 'success': False,
+    #                 'error': 'Invalid input: message is empty or too long',
+    #                 'response': None
+    #             }
+            
+    #         user_message = Message(role='user', content=user_input)
+    #         self.context_manager.add_message(db, conversation_id, user_message)
+            
+    #         if self.context_manager.should_summarize(db, conversation_id):
+    #             messages_to_summarize = self.context_manager.get_messages_for_summarization(db, conversation_id)
+    #             if messages_to_summarize:
+    #                 summary_text = await self.generate_summary(messages_to_summarize)
+    #                 summary = ConversationSummary(
+    #                     summary_text=summary_text,
+    #                     message_range=(0, len(messages_to_summarize))
+    #                 )
+    #                 self.context_manager.add_summary(db, conversation_id, summary)
+    #                 logger.info(f"Created summary for conversation {conversation_id}")
+            
+    #         message_history, latest_summary = self.context_manager.prepare_context_for_llm(
+    #             db, conversation_id, self.llm_provider
+    #         )
+            
+    #         system_prompt = self.persona_manager.generate_system_prompt(
+    #             summary=latest_summary
+    #         )
+            
+    #         llm_messages = [{'role': 'system', 'content': system_prompt}]
+    #         llm_messages.extend(message_history)
+            
+    #         response = await self.llm_provider.generate_response(llm_messages)
+            
+    #         assistant_message = Message(role='assistant', content=response)
+    #         self.context_manager.add_message(db, conversation_id, assistant_message)
+            
+    #         return {
+    #             'success': True,
+    #             'response': response,
+    #             'summary_created': False,
+    #             'message_count': len(self.context_manager.get_conversation_history(db, conversation_id)),
+    #             'error': None
+    #         }
+            
+    #     except Exception as e:
+    #         logger.error(f"Error processing message: {e}")
+    #         return {
+    #             'success': False,
+    #             'error': str(e),
+    #             'response': None
+    #         }
+# In app/core/chatbot_core.py, update the process_message method in MessageProcessor class:
     async def process_message(self, db: Session, conversation_id: str, user_input: str) -> Dict:
-        """Main message processing pipeline"""
         try:
             if not self.validate_input(user_input):
                 return {
@@ -282,55 +339,26 @@ Summary:"""
                     'response': None
                 }
             
-            # Save user message
             user_message = Message(role='user', content=user_input)
+            # Token count will be calculated in add_message
             self.context_manager.add_message(db, conversation_id, user_message)
             
-            # Check if we should summarize the conversation
-            summary_created = False
-            if self.context_manager.should_summarize(db, conversation_id):
-                messages_to_summarize = self.context_manager.get_messages_for_summarization(db, conversation_id)
-                if messages_to_summarize:
-                    summary_text = await self.generate_summary(messages_to_summarize)
-                    summary = ConversationSummary(
-                        summary_text=summary_text,
-                        message_range=(0, len(messages_to_summarize))
-                    )
-                    self.context_manager.add_summary(db, conversation_id, summary)
-                    logger.info(f"Created summary for conversation {conversation_id}")
-                    summary_created = True
+            # Process the message and get response
+            response = await self.engine.generate_response(db, conversation_id, user_input)
             
-            # Get conversation history and latest summary for context
-            message_history, latest_summary = self.context_manager.prepare_context_for_llm(
-                db, conversation_id, self.llm_provider
-            )
-            
-            # Generate system prompt with persona and summary
-            system_prompt = self.persona_manager.generate_system_prompt(
-                summary=latest_summary.summary_text if latest_summary else None
-            )
-            
-            # Prepare messages for LLM
-            llm_messages = [{'role': 'system', 'content': system_prompt}]
-            llm_messages.extend([msg.to_dict() for msg in message_history])
-            
-            # Get response from LLM
-            response = await self.llm_provider.generate_response(llm_messages)
-            
-            # Save assistant's response
-            assistant_message = Message(role='assistant', content=response)
-            self.context_manager.add_message(db, conversation_id, assistant_message)
+            # Save the assistant's response
+            if response and 'response' in response and response['response']:
+                assistant_message = Message(role='assistant', content=response['response'])
+                self.context_manager.add_message(db, conversation_id, assistant_message)
             
             return {
                 'success': True,
-                'response': response,
-                'summary_created': summary_created,
-                'message_count': len(self.context_manager.get_conversation_history(db, conversation_id)),
-                'error': None
+                'response': response.get('response') if response else None,
+                'metadata': response.get('metadata', {}) if response else {}
             }
-            
+
         except Exception as e:
-            logger.error(f"Error processing message: {e}", exc_info=True)
+            logger.error(f"Error processing message: {str(e)}", exc_info=True)
             return {
                 'success': False,
                 'error': str(e),
