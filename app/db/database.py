@@ -1,10 +1,8 @@
 # app/db/database.py
 import os
-import socket
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-from urllib.parse import urlparse, urlunparse
 
 # Get DATABASE_URL from environment (Supabase PostgreSQL)
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -17,46 +15,10 @@ else:
     if DATABASE_URL.startswith("postgres://"):
         DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
     
-    # Add SSL and connection parameters if not present for Supabase
-    if "supabase.co" in DATABASE_URL and "sslmode=" not in DATABASE_URL:
+    # Add SSL parameters if not present for Supabase
+    if "supabase.com" in DATABASE_URL and "sslmode=" not in DATABASE_URL:
         separator = "&" if "?" in DATABASE_URL else "?"
-        DATABASE_URL += f"{separator}sslmode=require&connect_timeout=10"
-
-def resolve_hostname_to_ipv4(hostname):
-    """Resolve hostname to IPv4 address to avoid IPv6 issues"""
-    try:
-        # Force IPv4 resolution
-        result = socket.getaddrinfo(hostname, None, socket.AF_INET)
-        if result:
-            return result[0][4][0]  # Return first IPv4 address
-    except Exception:
-        pass
-    return hostname
-
-def create_ipv4_database_url(original_url):
-    """Convert database URL to use IPv4 address instead of hostname"""
-    if not original_url or "supabase.co" not in original_url:
-        return original_url
-    
-    try:
-        parsed = urlparse(original_url)
-        hostname = parsed.hostname
-        
-        if hostname and "supabase.co" in hostname:
-            ipv4_address = resolve_hostname_to_ipv4(hostname)
-            if ipv4_address != hostname:
-                # Replace hostname with IPv4 address
-                netloc = parsed.netloc.replace(hostname, ipv4_address)
-                new_parsed = parsed._replace(netloc=netloc)
-                return urlunparse(new_parsed)
-    except Exception as e:
-        print(f"Warning: Could not resolve IPv4 for {original_url}: {e}")
-    
-    return original_url
-
-# Create IPv4-optimized DATABASE_URL
-if DATABASE_URL and not DATABASE_URL.startswith("sqlite"):
-    DATABASE_URL = create_ipv4_database_url(DATABASE_URL)
+        DATABASE_URL += f"{separator}sslmode=require&connect_timeout=30"
 
 # Create engine with appropriate settings
 if DATABASE_URL.startswith("sqlite"):
@@ -66,21 +28,21 @@ if DATABASE_URL.startswith("sqlite"):
         echo=False
     )
 else:
-    # PostgreSQL/Supabase configuration with psycopg2
-    # Enhanced connection settings for better reliability
+    # PostgreSQL/Supabase configuration optimized for Vercel
     connect_args = {
         "sslmode": "require",
-        "connect_timeout": 20,
-        "application_name": "chatbot_app"
+        "connect_timeout": 30,
+        "application_name": "chatbot_vercel"
     }
     
     engine = create_engine(
         DATABASE_URL, 
         echo=False,
         pool_pre_ping=True,
-        pool_recycle=int(os.getenv("DB_POOL_RECYCLE", "300")),
-        pool_size=int(os.getenv("DB_POOL_SIZE", "3")),
-        max_overflow=int(os.getenv("DB_MAX_OVERFLOW", "5")),
+        pool_recycle=int(os.getenv("DB_POOL_RECYCLE", "280")),
+        pool_size=int(os.getenv("DB_POOL_SIZE", "2")),
+        max_overflow=int(os.getenv("DB_MAX_OVERFLOW", "3")),
+        pool_timeout=30,
         connect_args=connect_args
     )
 
@@ -96,10 +58,17 @@ def get_db():
         db.close()
 
 def test_connection():
-    """Test database connection"""
+    """Test database connection with detailed error reporting"""
     try:
         with engine.connect() as conn:
-            result = conn.execute("SELECT 1")
-            return True, "Connection successful"
+            result = conn.execute("SELECT 1 as test")
+            row = result.fetchone()
+            return True, f"Connection successful - Test result: {row[0]}"
     except Exception as e:
-        return False, str(e)
+        error_msg = str(e)
+        if "Cannot assign requested address" in error_msg:
+            return False, f"IPv6 networking issue: {error_msg}"
+        elif "timeout" in error_msg.lower():
+            return False, f"Connection timeout: {error_msg}"
+        else:
+            return False, f"Database error: {error_msg}"
