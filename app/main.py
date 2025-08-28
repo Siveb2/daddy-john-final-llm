@@ -191,11 +191,26 @@ async def enhanced_chat(
     db: Session = Depends(get_db)
 ):
     try:
+        # Ensure conversation exists
+        crud.get_or_create_conversation(
+            db=db, 
+            conversation_id=request.conversation_id, 
+            user_id="default_user"  # Or get from request/authentication
+        )
+        
         if hasattr(engine, 'chat_enhanced'):
-            response = await engine.chat_enhanced(db_session=db, conversation_id=request.conversation_id, user_input=request.user_input)
+            response = await engine.chat_enhanced(
+                db_session=db, 
+                conversation_id=request.conversation_id, 
+                user_input=request.user_input
+            )
         else:
             # Fallback for basic engine
-            response = await engine.chat(db=db, conversation_id=request.conversation_id, user_input=request.user_input)
+            response = await engine.chat(
+                db=db, 
+                conversation_id=request.conversation_id, 
+                user_input=request.user_input
+            )
         return response
     except Exception as e:
         logger.error(f"Chat endpoint error for conversation {request.conversation_id}: {e}", exc_info=True)
