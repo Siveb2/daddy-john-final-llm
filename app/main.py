@@ -193,11 +193,10 @@ async def enhanced_chat(
 ):
     try:
         # Ensure conversation exists
-        crud.get_or_create_conversation(
-            db=db, 
-            conversation_id=request.conversation_id, 
-            user_id="default_user"
-        )
+        conversation = crud.get_conversation(db, request.conversation_id)
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        
         
         start_time = time.time()
         
@@ -580,7 +579,7 @@ async def test_endpoint():
             "database_url_configured": bool(os.getenv("DATABASE_URL")),
             "persona_file_exists": os.path.exists(os.getenv("PERSONA_FILE_PATH", "persona.txt")),
             "debug_info": {
-                "production_engine_type": type(production_engine).__name__ if production_engine else "None",
+                "production_engine_type": engine.__class__.__name__ if engine else "None",
                 "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
                 "platform": sys.platform
             }
