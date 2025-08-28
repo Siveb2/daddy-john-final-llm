@@ -17,10 +17,12 @@ from sqlalchemy.orm import Session
 # --- Core Application Imports ---
 try:
     from app.core.advanced_features import ProductionChatbotEngine, ColoredFormatter
+    ADVANCED_FEATURES_AVAILABLE = True
 except ImportError as e:
     logging.error(f"Import error for advanced features: {e}")
     # Fallback to basic engine
     from app.core.chatbot_core import ChatbotEngine as ProductionChatbotEngine
+    ADVANCED_FEATURES_AVAILABLE = False
     
     class ColoredFormatter(logging.Formatter):
         def format(self, record):
@@ -51,21 +53,26 @@ async def lifespan(app: FastAPI):
         
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
-            logger.error("OPENAI_API_KEY environment variable is required")
-            raise ValueError("OPENAI_API_KEY is required")
-            
+            logger.warning("OPENAI_API_KEY not found - running in demo mode")
+            # Don't fail, just log warning
+        
         redis_url = os.getenv("REDIS_URL")
         persona_file = os.getenv("PERSONA_FILE_PATH", "persona.txt")
         
-        production_engine = ProductionChatbotEngine(
-            openai_api_key=api_key,
-            persona_file_path=persona_file,
-            redis_url=redis_url
-        )
-        logger.info("✅ Enhanced Chatbot Engine initialized successfully")
+        # Initialize with fallback for missing API key
+        if api_key:
+            production_engine = ProductionChatbotEngine(
+                openai_api_key=api_key,
+                persona_file_path=persona_file,
+                redis_url=redis_url
+            )
+            logger.info("✅ Enhanced Chatbot Engine initialized successfully")
+        else:
+            logger.info("⚠️ Running without OpenAI API key - limited functionality")
+            
     except Exception as e:
-        logger.error(f"Failed to initialize chatbot engine: {e}")
-        raise
+        logger.error(f"Error during initialization: {e}")
+        # Don't raise - allow server to start even with initialization issues
     
     yield
     
@@ -109,7 +116,7 @@ class PersonaUpdateRequest(BaseModel):
 # --- Dependency for Engine ---
 async def get_engine() -> ProductionChatbotEngine:
     if production_engine is None:
-        raise HTTPException(status_code=503, detail="Chatbot engine is not available")
+        raise HTTPException(status_code=503, detail="Chatbot engine is not available. Please check OPENAI_API_KEY configuration.")
     return production_engine
 
 # =================================================================
@@ -214,62 +221,123 @@ def delete_conversation(conversation_id: str, db: Session = Depends(get_db)):
 # --- Persona & System Management Endpoints ---
 
 @app.get("/persona")
-async def get_persona(engine: ProductionChatbotEngine = Depends(get_engine)):
+async def get_persona():
     try:
-        return {"persona_content": engine.persona_manager.persona_content}
+        if production_engine and hasattr(production_engine, 'persona_manager'):
+            return {"persona_content": production_engine.persona_manager.persona_content}
+        else:
+            # Fallback response
+            return {"persona_content": "You are a helpful AI assistant."}
     except Exception as e:
         logger.error(f"Error getting persona: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"persona_content": "You are a helpful AI assistant."}
 
 @app.put("/persona")
-async def update_persona(
-    request: PersonaUpdateRequest,
-    engine: ProductionChatbotEngine = Depends(get_engine)
-):
+async def update_persona(request: PersonaUpdateRequest):
     try:
-        engine.persona_manager.update_persona(request.persona_content)
-        return {"status": "success", "message": "Persona updated"}
+        if production_engine and hasattr(production_engine, 'persona_manager'):
+            production_engine.persona_manager.update_persona(request.persona_content)
+            return {"status": "success", "message": "Persona updated"}
+        else:
+            return {"status": "warning", "message": "Persona update not available - engine not initialized"}
     except Exception as e:
         logger.error(f"Error updating persona: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/health")
-async def health_check(engine: ProductionChatbotEngine = Depends(get_engine), db: Session = Depends(get_db)):
+async def health_check():
     try:
-        if hasattr(engine, 'health_checker'):
-            health_status = await engine.health_checker.run_comprehensive_health_check(db)
-            status_code = 503 if health_status.get('overall_status') in ['unhealthy', 'error'] else 200
-            return JSONResponse(content=health_status, status_code=status_code)
+        health_status = {
+            "timestamp": datetime.now().isoformat(),
+            "overall_status": "healthy",
+            "components": {},
+            "message": "Service is running"
+        }
+        
+        # Check database
+        try:
+            with database.SessionLocal() as db:
+                db.execute("SELECT 1")
+            health_status["components"]["database"] = {"status": "healthy"}
+        except Exception as e:
+            health_status["components"]["database"] = {"status": "error", "error": str(e)}
+            health_status["overall_status"] = "degraded"
+        
+        # Check engine
+        if production_engine:
+            if hasattr(production_engine, 'health_checker'):
+                try:
+                    with database.SessionLocal() as db:
+                        engine_health = await production_engine.health_checker.run_comprehensive_health_check(db)
+                    health_status["components"]["engine"] = engine_health["components"]
+                except Exception as e:
+                    health_status["components"]["engine"] = {"status": "error", "error": str(e)}
+            else:
+                health_status["components"]["engine"] = {"status": "healthy", "type": "basic"}
         else:
-            # Basic health check
-            return JSONResponse(content={
-                "timestamp": datetime.now().isoformat(),
-                "overall_status": "healthy",
-                "components": {"llm_provider": {"status": "healthy"}},
-                "message": "Basic health check passed"
-            }, status_code=200)
+            health_status["components"]["engine"] = {"status": "not_initialized"}
+            health_status["overall_status"] = "degraded"
+        
+        # Check API key
+        api_key = os.getenv("OPENAI_API_KEY")
+        if api_key:
+            health_status["components"]["openai_api"] = {"status": "configured"}
+        else:
+            health_status["components"]["openai_api"] = {"status": "not_configured"}
+            health_status["overall_status"] = "degraded"
+        
+        status_code = 200 if health_status["overall_status"] == "healthy" else 503
+        return JSONResponse(content=health_status, status_code=status_code)
+        
     except Exception as e:
-        logger.error(f"Health check error: {e}")
+        logger.error(f"Health check error: {e}", exc_info=True)
         return JSONResponse(content={
             "timestamp": datetime.now().isoformat(),
             "overall_status": "error",
-            "error": str(e)
+            "error": str(e),
+            "message": "Health check failed"
         }, status_code=503)
 
 @app.get("/system/status")
-async def get_system_status(engine: ProductionChatbotEngine = Depends(get_engine)):
+async def get_system_status():
     try:
-        if hasattr(engine, 'get_comprehensive_status'):
-            return await engine.get_comprehensive_status()
-        else:
-            return {
-                "timestamp": datetime.now().isoformat(),
-                "status": "basic_engine_active",
-                "message": "System is running with basic features"
+        status = {
+            "timestamp": datetime.now().isoformat(),
+            "status": "running",
+            "features": {
+                "advanced_features": ADVANCED_FEATURES_AVAILABLE,
+                "engine_initialized": production_engine is not None,
+                "api_key_configured": bool(os.getenv("OPENAI_API_KEY"))
             }
+        }
+        
+        if production_engine and hasattr(production_engine, 'get_comprehensive_status'):
+            comprehensive_status = await production_engine.get_comprehensive_status()
+            status.update(comprehensive_status)
+        
+        return status
     except Exception as e:
         logger.error(f"System status error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return {
+            "timestamp": datetime.now().isoformat(),
+            "status": "error",
+            "error": str(e),
+            "message": "System status check failed"
+        }
+
+# --- Root endpoint for basic connectivity test ---
+@app.get("/")
+async def root():
+    return {
+        "message": "AI Persona Chatbot API is running",
+        "version": "3.0.0",
+        "status": "healthy",
+        "endpoints": {
+            "health": "/health",
+            "chat": "/chat/enhanced",
+            "docs": "/docs"
+        }
+    }
 
 # --- Main Entry Point ---
 if __name__ == "__main__":
