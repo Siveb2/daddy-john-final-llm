@@ -41,22 +41,20 @@ logger.setLevel(logging.INFO)
 
 # --- Global Engine Instance ---
 production_engine: Optional[ProductionChatbotEngine] = None
+engine_initialized = False
+engine_init_error = None
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Handles application startup and shutdown events."""
-    global production_engine
-    logger.info("🚀 Starting Enhanced FastAPI Chatbot Server...")
-
+def initialize_engine():
+    """Initialize engine on first request (for Vercel serverless compatibility)"""
+    global production_engine, engine_initialized, engine_init_error
+    
+    if engine_initialized:
+        return production_engine
+    
     try:
-        logger.info("Initializing database tables...")
-        try:
-            models.Base.metadata.create_all(bind=database.engine)
-            logger.info("✅ Database tables initialized successfully")
-        except Exception as e:
-            logger.error(f"Database initialization error: {e}")
-
-        # Get configuration with detailed logging
+        logger.info("🚀 Initializing Chatbot Engine (lazy initialization)...")
+        
+        # Get configuration
         api_key = os.getenv("OPENAI_API_KEY")
         persona_file = os.getenv("PERSONA_FILE_PATH", "persona.txt")
         redis_url = os.getenv("REDIS_URL")
@@ -68,81 +66,80 @@ async def lifespan(app: FastAPI):
         logger.info(f"  - Persona file exists: {os.path.exists(persona_file)}")
         logger.info(f"  - Advanced features available: {ADVANCED_FEATURES_AVAILABLE}")
 
-        # Initialize with fallback for missing API key
-        if api_key:
-            logger.info("🔧 Starting engine initialization...")
-            try:
-                if ADVANCED_FEATURES_AVAILABLE:
-                    logger.info("Attempting to initialize ProductionChatbotEngine...")
-                    production_engine = ProductionChatbotEngine(
-                        openai_api_key=api_key,
-                        persona_file_path=persona_file,
-                        redis_url=redis_url
-                    )
-                    logger.info("✅ Advanced Production Chatbot Engine initialized")
-                else:
-                    logger.info("Attempting to initialize basic ChatbotEngine...")
-                    # Use basic engine with correct parameters
-                    from app.core.chatbot_core import ChatbotEngine
-                    logger.info("ChatbotEngine imported successfully")
-                    
-                    production_engine = ChatbotEngine(
-                        openai_api_key=api_key,
-                        persona_file_path=persona_file
-                    )
-                    logger.info("✅ Basic Chatbot Engine initialized")
-                    
-                # Verify engine was created
-                if production_engine:
-                    logger.info(f"✅ Engine created successfully: {type(production_engine).__name__}")
-                else:
-                    logger.error("❌ Engine is None after initialization")
-                    
-            except Exception as engine_error:
-                logger.error(f"❌ Engine initialization failed: {engine_error}")
-                logger.error(f"Error type: {type(engine_error).__name__}")
-                import traceback
-                logger.error(f"Full traceback: {traceback.format_exc()}")
-                
-                # Try to initialize basic engine as fallback
-                try:
-                    logger.info("🔄 Attempting fallback engine initialization...")
-                    from app.core.chatbot_core import ChatbotEngine
-                    production_engine = ChatbotEngine(
-                        openai_api_key=api_key,
-                        persona_file_path=persona_file
-                    )
-                    logger.info("✅ Basic Chatbot Engine initialized as fallback")
-                except Exception as fallback_error:
-                    logger.error(f"❌ Fallback engine initialization failed: {fallback_error}")
-                    logger.error(f"Fallback error type: {type(fallback_error).__name__}")
-                    import traceback
-                    logger.error(f"Fallback traceback: {traceback.format_exc()}")
-                    production_engine = None
+        if not api_key:
+            raise Exception("OPENAI_API_KEY not found in environment variables")
+
+        # Initialize database tables
+        try:
+            models.Base.metadata.create_all(bind=database.engine)
+            logger.info("✅ Database tables initialized")
+        except Exception as e:
+            logger.warning(f"Database initialization warning: {e}")
+
+        # Initialize engine
+        logger.info("🔧 Starting engine initialization...")
+        if ADVANCED_FEATURES_AVAILABLE:
+            logger.info("Attempting to initialize ProductionChatbotEngine...")
+            production_engine = ProductionChatbotEngine(
+                openai_api_key=api_key,
+                persona_file_path=persona_file,
+                redis_url=redis_url
+            )
+            logger.info("✅ Advanced Production Chatbot Engine initialized")
         else:
-            logger.warning("⚠️ OPENAI_API_KEY not found - engine will not be initialized")
-            production_engine = None
+            logger.info("Attempting to initialize basic ChatbotEngine...")
+            from app.core.chatbot_core import ChatbotEngine
+            logger.info("ChatbotEngine imported successfully")
             
-        # Final status check
-        logger.info(f"🏁 Initialization complete:")
-        logger.info(f"  - Engine initialized: {production_engine is not None}")
-        logger.info(f"  - Engine type: {type(production_engine).__name__ if production_engine else 'None'}")
+            production_engine = ChatbotEngine(
+                openai_api_key=api_key,
+                persona_file_path=persona_file
+            )
+            logger.info("✅ Basic Chatbot Engine initialized")
+            
+        # Verify engine was created
+        if production_engine:
+            logger.info(f"✅ Engine created successfully: {type(production_engine).__name__}")
+            engine_initialized = True
+            engine_init_error = None
+        else:
+            raise Exception("Engine is None after initialization")
             
     except Exception as e:
-        logger.error(f"❌ Critical startup error: {e}")
+        logger.error(f"❌ Engine initialization failed: {e}")
+        logger.error(f"Error type: {type(e).__name__}")
         import traceback
-        logger.error(f"Critical error traceback: {traceback.format_exc()}")
-        production_engine = None
-
-    yield
-    
-    logger.info("🔄 Shutting down server...")
-    if production_engine and hasattr(production_engine, 'shutdown'):
+        logger.error(f"Full traceback: {traceback.format_exc()}")
+        
+        # Try fallback
         try:
-            await production_engine.shutdown()
-        except Exception as e:
-            logger.error(f"Error during shutdown: {e}")
-    logger.info("✅ Shutdown complete.")
+            logger.info("🔄 Attempting fallback engine initialization...")
+            from app.core.chatbot_core import ChatbotEngine
+            production_engine = ChatbotEngine(
+                openai_api_key=api_key,
+                persona_file_path=persona_file
+            )
+            logger.info("✅ Basic Chatbot Engine initialized as fallback")
+            engine_initialized = True
+            engine_init_error = None
+        except Exception as fallback_error:
+            logger.error(f"❌ Fallback engine initialization failed: {fallback_error}")
+            production_engine = None
+            engine_initialized = True  # Mark as attempted
+            engine_init_error = str(fallback_error)
+    
+    logger.info(f"🏁 Engine initialization complete:")
+    logger.info(f"  - Engine initialized: {production_engine is not None}")
+    logger.info(f"  - Engine type: {type(production_engine).__name__ if production_engine else 'None'}")
+    
+    return production_engine
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Simplified lifespan for Vercel compatibility"""
+    logger.info("🚀 FastAPI application starting...")
+    yield
+    logger.info("🔄 FastAPI application shutting down...")
 
 # --- FastAPI App Initialization ---
 app = FastAPI(
@@ -175,9 +172,11 @@ class PersonaUpdateRequest(BaseModel):
 
 # --- Dependency for Engine ---
 async def get_engine() -> ProductionChatbotEngine:
-    if production_engine is None:
-        raise HTTPException(status_code=503, detail="Chatbot engine is not available. Please check OPENAI_API_KEY configuration.")
-    return production_engine
+    engine = initialize_engine()
+    if engine is None:
+        error_msg = f"Chatbot engine is not available. Error: {engine_init_error or 'Unknown initialization error'}"
+        raise HTTPException(status_code=503, detail=error_msg)
+    return engine
 
 # =================================================================
 # --- API ENDPOINTS ---
