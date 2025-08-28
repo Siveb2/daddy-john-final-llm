@@ -49,7 +49,12 @@ async def lifespan(app: FastAPI):
 
     try:
         logger.info("Initializing database tables...")
-        models.Base.metadata.create_all(bind=database.engine)
+        try:
+            models.Base.metadata.create_all(bind=database.engine)
+            logger.info("✅ Database tables initialized successfully")
+        except Exception as e:
+            logger.error(f"Database initialization error: {e}")
+            # Continue without failing - database might not be available
         
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
@@ -61,12 +66,23 @@ async def lifespan(app: FastAPI):
         
         # Initialize with fallback for missing API key
         if api_key:
-            production_engine = ProductionChatbotEngine(
-                openai_api_key=api_key,
-                persona_file_path=persona_file,
-                redis_url=redis_url
-            )
-            logger.info("✅ Enhanced Chatbot Engine initialized successfully")
+            try:
+                production_engine = ProductionChatbotEngine(
+                    openai_api_key=api_key,
+                    persona_file_path=persona_file,
+                    redis_url=redis_url
+                )
+                logger.info("✅ Enhanced Chatbot Engine initialized successfully")
+            except Exception as e:
+                logger.error(f"Engine initialization error: {e}")
+                # Try to initialize basic engine as fallback
+                try:
+                    from app.core.chatbot_core import ChatbotEngine
+                    production_engine = ChatbotEngine(api_key, persona_file)
+                    logger.info("✅ Basic Chatbot Engine initialized as fallback")
+                except Exception as fallback_error:
+                    logger.error(f"Fallback engine initialization failed: {fallback_error}")
+                    production_engine = None
         else:
             logger.info("⚠️ Running without OpenAI API key - limited functionality")
             
@@ -259,8 +275,9 @@ async def health_check():
         
         # Check database
         try:
+            from sqlalchemy import text
             with database.SessionLocal() as db:
-                db.execute("SELECT 1")
+                db.execute(text("SELECT 1"))
             health_status["components"]["database"] = {"status": "healthy"}
         except Exception as e:
             health_status["components"]["database"] = {"status": "error", "error": str(e)}
@@ -311,12 +328,30 @@ async def get_system_status():
                 "advanced_features": ADVANCED_FEATURES_AVAILABLE,
                 "engine_initialized": production_engine is not None,
                 "api_key_configured": bool(os.getenv("OPENAI_API_KEY"))
+            },
+            "environment": {
+                "database_url_configured": bool(os.getenv("DATABASE_URL")),
+                "redis_url_configured": bool(os.getenv("REDIS_URL")),
+                "persona_file_path": os.getenv("PERSONA_FILE_PATH", "persona.txt")
             }
         }
         
+        # Test database connection
+        try:
+            from sqlalchemy import text
+            with database.SessionLocal() as db:
+                db.execute(text("SELECT 1"))
+            status["database"] = {"status": "connected"}
+        except Exception as e:
+            status["database"] = {"status": "error", "error": str(e)}
+        
+        # Test engine if available
         if production_engine and hasattr(production_engine, 'get_comprehensive_status'):
-            comprehensive_status = await production_engine.get_comprehensive_status()
-            status.update(comprehensive_status)
+            try:
+                comprehensive_status = await production_engine.get_comprehensive_status()
+                status.update(comprehensive_status)
+            except Exception as e:
+                status["engine_error"] = str(e)
         
         return status
     except Exception as e:
@@ -340,6 +375,17 @@ async def root():
             "chat": "/chat/enhanced",
             "docs": "/docs"
         }
+    }
+
+@app.get("/test")
+async def test_endpoint():
+    """Simple test endpoint that doesn't require database connection"""
+    return {
+        "status": "success",
+        "message": "Basic API is working",
+        "timestamp": datetime.now().isoformat(),
+        "engine_status": "initialized" if production_engine else "not_initialized",
+        "api_key_configured": bool(os.getenv("OPENAI_API_KEY"))
     }
 
 # --- Main Entry Point ---

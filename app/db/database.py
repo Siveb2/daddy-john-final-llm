@@ -24,14 +24,20 @@ if DATABASE_URL.startswith("sqlite"):
     )
 else:
     # PostgreSQL/Supabase configuration with psycopg2
-    # Add connection pooling settings for Vercel
+    # Add connection pooling settings for Vercel and SSL for Supabase
     engine = create_engine(
         DATABASE_URL, 
         echo=False,
         pool_pre_ping=True,
         pool_recycle=300,
         pool_size=5,
-        max_overflow=10
+        max_overflow=10,
+        # Add SSL settings for Supabase
+        connect_args={
+            "sslmode": "require",
+            "connect_timeout": 10,
+            "application_name": "chatbot_app"
+        } if "supabase" in DATABASE_URL else {}
     )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
