@@ -344,4 +344,6 @@ async def root():
 
 # --- Main Entry Point ---
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # Only run uvicorn if not in Vercel environment
+    if not os.getenv("VERCEL"):
+        uvicorn.run(app, host="0.0.0.0", port=8000)

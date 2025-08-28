@@ -23,3 +23,6 @@ httpx==0.27.0
 # Additional utilities for production
 tenacity==8.2.3
 redis==5.0.1
+
+# Vercel specific
+starlette==0.35.1

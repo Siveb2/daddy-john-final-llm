@@ -24,7 +24,15 @@ if DATABASE_URL.startswith("sqlite"):
     )
 else:
     # PostgreSQL/Supabase configuration with psycopg2
-    engine = create_engine(DATABASE_URL, echo=False)
+    # Add connection pooling settings for Vercel
+    engine = create_engine(
+        DATABASE_URL, 
+        echo=False,
+        pool_pre_ping=True,
+        pool_recycle=300,
+        pool_size=5,
+        max_overflow=10
+    )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
