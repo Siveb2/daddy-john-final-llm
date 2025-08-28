@@ -164,7 +164,7 @@ class ConversationCreateRequest(BaseModel):
     user_id: str
 
 class ChatRequest(BaseModel):
-    message: str = Field(..., min_length=1, max_length=4000)
+    user_input: str = Field(..., min_length=1, max_length=4000)
     conversation_id: str
 
 class PersonaUpdateRequest(BaseModel):
@@ -192,10 +192,10 @@ async def enhanced_chat(
 ):
     try:
         if hasattr(engine, 'chat_enhanced'):
-            response = await engine.chat_enhanced(db_session=db, conversation_id=request.conversation_id, user_input=request.message)
+            response = await engine.chat_enhanced(db_session=db, conversation_id=request.conversation_id, user_input=request.user_input)
         else:
             # Fallback for basic engine
-            response = await engine.chat(db=db, conversation_id=request.conversation_id, user_input=request.message)
+            response = await engine.chat(db=db, conversation_id=request.conversation_id, user_input=request.user_input)
         return response
     except Exception as e:
         logger.error(f"Chat endpoint error for conversation {request.conversation_id}: {e}", exc_info=True)
@@ -211,9 +211,9 @@ async def enhanced_chat_stream(
     async def generate_stream():
         try:
             if hasattr(engine, 'chat_enhanced'):
-                result = await engine.chat_enhanced(db_session=db, conversation_id=request.conversation_id, user_input=request.message)
+                result = await engine.chat_enhanced(db_session=db, conversation_id=request.conversation_id, user_input=request.user_input)
             else:
-                result = await engine.chat(db=db, conversation_id=request.conversation_id, user_input=request.message)
+                result = await engine.chat(db=db, conversation_id=request.conversation_id, user_input=request.user_input)
                 
             if result.get('success') and result.get('response'):
                 response_text = result['response']
