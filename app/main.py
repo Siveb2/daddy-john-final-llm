@@ -55,15 +55,25 @@ async def lifespan(app: FastAPI):
             logger.info("✅ Database tables initialized successfully")
         except Exception as e:
             logger.error(f"Database initialization error: {e}")
-        
+
+        # Get configuration with detailed logging
         api_key = os.getenv("OPENAI_API_KEY")
         persona_file = os.getenv("PERSONA_FILE_PATH", "persona.txt")
         redis_url = os.getenv("REDIS_URL")
         
+        logger.info(f"Configuration check:")
+        logger.info(f"  - API key configured: {bool(api_key)}")
+        logger.info(f"  - API key length: {len(api_key) if api_key else 0}")
+        logger.info(f"  - Persona file: {persona_file}")
+        logger.info(f"  - Persona file exists: {os.path.exists(persona_file)}")
+        logger.info(f"  - Advanced features available: {ADVANCED_FEATURES_AVAILABLE}")
+
         # Initialize with fallback for missing API key
         if api_key:
+            logger.info("🔧 Starting engine initialization...")
             try:
                 if ADVANCED_FEATURES_AVAILABLE:
+                    logger.info("Attempting to initialize ProductionChatbotEngine...")
                     production_engine = ProductionChatbotEngine(
                         openai_api_key=api_key,
                         persona_file_path=persona_file,
@@ -71,17 +81,32 @@ async def lifespan(app: FastAPI):
                     )
                     logger.info("✅ Advanced Production Chatbot Engine initialized")
                 else:
+                    logger.info("Attempting to initialize basic ChatbotEngine...")
                     # Use basic engine with correct parameters
                     from app.core.chatbot_core import ChatbotEngine
+                    logger.info("ChatbotEngine imported successfully")
+                    
                     production_engine = ChatbotEngine(
                         openai_api_key=api_key,
                         persona_file_path=persona_file
                     )
                     logger.info("✅ Basic Chatbot Engine initialized")
+                    
+                # Verify engine was created
+                if production_engine:
+                    logger.info(f"✅ Engine created successfully: {type(production_engine).__name__}")
+                else:
+                    logger.error("❌ Engine is None after initialization")
+                    
             except Exception as engine_error:
-                logger.error(f"Engine initialization failed: {engine_error}")
+                logger.error(f"❌ Engine initialization failed: {engine_error}")
+                logger.error(f"Error type: {type(engine_error).__name__}")
+                import traceback
+                logger.error(f"Full traceback: {traceback.format_exc()}")
+                
                 # Try to initialize basic engine as fallback
                 try:
+                    logger.info("🔄 Attempting fallback engine initialization...")
                     from app.core.chatbot_core import ChatbotEngine
                     production_engine = ChatbotEngine(
                         openai_api_key=api_key,
@@ -89,14 +114,24 @@ async def lifespan(app: FastAPI):
                     )
                     logger.info("✅ Basic Chatbot Engine initialized as fallback")
                 except Exception as fallback_error:
-                    logger.error(f"Fallback engine initialization failed: {fallback_error}")
+                    logger.error(f"❌ Fallback engine initialization failed: {fallback_error}")
+                    logger.error(f"Fallback error type: {type(fallback_error).__name__}")
+                    import traceback
+                    logger.error(f"Fallback traceback: {traceback.format_exc()}")
                     production_engine = None
         else:
             logger.warning("⚠️ OPENAI_API_KEY not found - engine will not be initialized")
             production_engine = None
             
+        # Final status check
+        logger.info(f"🏁 Initialization complete:")
+        logger.info(f"  - Engine initialized: {production_engine is not None}")
+        logger.info(f"  - Engine type: {type(production_engine).__name__ if production_engine else 'None'}")
+            
     except Exception as e:
-        logger.error(f"Critical startup error: {e}")
+        logger.error(f"❌ Critical startup error: {e}")
+        import traceback
+        logger.error(f"Critical error traceback: {traceback.format_exc()}")
         production_engine = None
 
     yield
