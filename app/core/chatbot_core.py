@@ -10,7 +10,6 @@ import openai
 from openai import OpenAI
 import asyncio
 import aiohttp
-from tenacity import retry, stop_after_attempt, wait_exponential
 from sqlalchemy.orm import Session
 
 # Configure logging
@@ -57,43 +56,44 @@ class LLMProvider:
 
 class OpenAIProvider(LLMProvider):
     """OpenAI API provider"""
-    def __init__(self, api_key: str, model: str = "cognitivecomputations/dolphin3.0-r1-mistral-24b:free"): # 1. Change default model
+    def __init__(self, api_key: str, model: str = "cognitivecomputations/dolphin3.0-r1-mistral-24b:free"): 
         super().__init__(api_key, model)
-        # 2. Add base_url for OpenRouter
         self.client = OpenAI(
             api_key=api_key,
             base_url="https://openrouter.ai/api/v1" 
         )
         self.encoding = tiktoken.get_encoding("cl100k_base")
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=4, max=10)
-    )
     async def generate_response(self, messages: List[Dict], max_tokens: int = 1000) -> str:
-        """Generate response using OpenAI API with retry logic"""
-        try:
-            response = await asyncio.to_thread(
-                self.client.chat.completions.create,
-                model=self.model,
-                messages=messages,
-                max_tokens=max_tokens,
-                temperature=0.7,
-                extra_headers={ 
-                    "HTTP-Referer": "http://localhost", # Replace with your app's URL in production
-                    "X-Title": "DaddyJohn AI Chatbot" # Replace with your app's name
-                }
-            )
-            return response.choices[0].message.content
-        except openai.RateLimitError:
-            logger.warning("Rate limit hit, retrying...")
-            raise
-        except openai.APIError as e:
-            logger.error(f"OpenAI API error: {e}")
-            raise
-        except Exception as e:
-            logger.error(f"Unexpected error: {e}")
-            raise
+        """Generate response using OpenAI API with simple retry logic"""
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                response = await asyncio.to_thread(
+                    self.client.chat.completions.create,
+                    model=self.model,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=0.7,
+                    extra_headers={ 
+                        "HTTP-Referer": "http://localhost", 
+                        "X-Title": "DaddyJohn AI Chatbot" 
+                    }
+                )
+                return response.choices[0].message.content
+            except openai.RateLimitError:
+                if attempt < max_retries - 1:
+                    wait_time = (2 ** attempt) * 2  # Exponential backoff
+                    logger.warning(f"Rate limit hit, retrying in {wait_time}s...")
+                    await asyncio.sleep(wait_time)
+                    continue
+                raise
+            except openai.APIError as e:
+                logger.error(f"OpenAI API error: {e}")
+                raise
+            except Exception as e:
+                logger.error(f"Unexpected error: {e}")
+                raise
     
     def count_tokens(self, text: str) -> int:
         """Count tokens in text"""
@@ -162,14 +162,10 @@ class PersonaManager:
 class ContextManager:
     """Manages conversation context and message history"""
     
-    # NEW __init__ method for ContextManager
     def __init__(self, max_context_tokens: int = 3000, summarize_threshold: int = 20):
         self.max_context_tokens = max_context_tokens
         self.summarize_threshold = summarize_threshold
-        # The in-memory dictionaries are now gone!
     
-    # REPLACE ALL METHODS in ContextManager with these:
-
     def add_message(self, db: Session, conversation_id: str, message: Message) -> None:
         """Saves a message to the database."""
         from app.db import crud
@@ -211,7 +207,6 @@ class ContextManager:
 
         message_dicts = [{'role': msg.role, 'content': msg.content} for msg in messages if msg.role != 'system']
 
-        # Truncation logic remains the same
         if hasattr(llm_provider, 'count_messages_tokens'):
             while message_dicts and llm_provider.count_messages_tokens(message_dicts) > self.max_context_tokens:
                 message_dicts.pop(0)
@@ -239,7 +234,6 @@ class MessageProcessor:
         if not messages:
             return "No messages to summarize."
         
-        # Create conversation text for summarization
         conversation_text = "\n".join([
             f"{msg.role}: {msg.content}" for msg in messages
         ])
@@ -261,7 +255,6 @@ Summary:"""
     async def process_message(self, db: Session, conversation_id: str, user_input: str) -> Dict:
         """Main message processing pipeline"""
         try:
-            # Validate input
             if not self.validate_input(user_input):
                 return {
                     'success': False,
@@ -269,12 +262,9 @@ Summary:"""
                     'response': None
                 }
             
-            # Add user message to context
             user_message = Message(role='user', content=user_input)
             self.context_manager.add_message(db, conversation_id, user_message)
             
-            # Check if summarization is needed
-            summary_created = False
             if self.context_manager.should_summarize(db, conversation_id):
                 messages_to_summarize = self.context_manager.get_messages_for_summarization(db, conversation_id)
                 if messages_to_summarize:
@@ -284,35 +274,29 @@ Summary:"""
                         message_range=(0, len(messages_to_summarize))
                     )
                     self.context_manager.add_summary(db, conversation_id, summary)
-                    summary_created = True
                     logger.info(f"Created summary for conversation {conversation_id}")
             
-            # Prepare context for LLM
             message_history, latest_summary = self.context_manager.prepare_context_for_llm(
                 db, conversation_id, self.llm_provider
             )
             
-            # Generate system prompt
             system_prompt = self.persona_manager.generate_system_prompt(
                 summary=latest_summary
             )
             
-            # Prepare messages for LLM
             llm_messages = [{'role': 'system', 'content': system_prompt}]
             llm_messages.extend(message_history)
             
-            # Generate response
             response = await self.llm_provider.generate_response(llm_messages)
             
-            # Add assistant response to context
             assistant_message = Message(role='assistant', content=response)
             self.context_manager.add_message(db, conversation_id, assistant_message)
             
             return {
                 'success': True,
                 'response': response,
-                'summary_created': summary_created,
-                'message_count': self.context_manager.message_counts.get(conversation_id, 0),
+                'summary_created': False,
+                'message_count': len(self.context_manager.get_conversation_history(db, conversation_id)),
                 'error': None
             }
             
@@ -324,12 +308,10 @@ Summary:"""
                 'response': None
             }
 
-# Main Chatbot Engine
 class ChatbotEngine:
     """Main chatbot engine that orchestrates all components"""
     
     def __init__(self, openai_api_key: str, persona_file_path: str = "persona.txt"):
-        # Initialize components
         self.llm_provider = OpenAIProvider(openai_api_key)
         self.persona_manager = PersonaManager(persona_file_path)
         self.context_manager = ContextManager()
@@ -347,15 +329,6 @@ class ChatbotEngine:
     
     def create_conversation(self, conversation_id: str) -> Dict:
         """Create a new conversation"""
-        if conversation_id in self.context_manager.conversations:
-            return {
-                'success': False,
-                'error': 'Conversation already exists'
-            }
-        
-        self.context_manager.conversations[conversation_id] = []
-        self.context_manager.message_counts[conversation_id] = 0
-        
         return {
             'success': True,
             'conversation_id': conversation_id
@@ -386,59 +359,43 @@ class ChatbotEngine:
     
     def get_conversation_summaries(self, conversation_id: str) -> Dict:
         """Get all summaries for a conversation"""
-        summaries = self.context_manager.summaries.get(conversation_id, [])
+        summaries = self.context_manager.get_latest_summary(conversation_id)
         return {
             'success': True,
             'summaries': [
                 {
-                    'summary': s.summary_text,
-                    'message_range': s.message_range,
-                    'created_at': s.created_at.isoformat()
+                    'summary': summaries,
+                    'message_range': None,
+                    'created_at': None
                 }
-                for s in summaries
             ]
         }
 
-# Example usage and testing
 async def example_usage():
     """Example of how to use the chatbot engine"""
     
-    # Initialize the engine (you'll need to provide your OpenAI API key)
-    # engine = ChatbotEngine("your-openai-api-key-here")
+    engine = ChatbotEngine("your-openai-api-key-here")
     
-    # For demo purposes, we'll show the structure
     print("Chatbot Engine Structure:")
     print("1. Initialize with: engine = ChatbotEngine('your-openai-api-key')")
     print("2. Create conversation: engine.create_conversation('user_123')")
     print("3. Chat: await engine.chat('user_123', 'Hello!')")
     print("4. Update persona: engine.update_persona('New persona content')")
     
-    # Example conversation flow:
     conversation_id = "user_123"
     
-    # This would be the actual usage:
-    """
-    # Create conversation
     result = engine.create_conversation(conversation_id)
     print(f"Conversation created: {result}")
     
-    # Send messages
-    for i in range(25):  # This will trigger summarization at message 20
+    for i in range(25):  
         response = await engine.chat(conversation_id, f"This is message {i+1}")
         print(f"Response {i+1}: {response}")
         
-        if response.get('summary_created'):
-            print("Summary was created!")
-    
-    # Get conversation history
     history = engine.get_conversation_history(conversation_id)
     print(f"History: {history}")
     
-    # Get summaries
     summaries = engine.get_conversation_summaries(conversation_id)
     print(f"Summaries: {summaries}")
-    """
 
 if __name__ == "__main__":
-    # Run example
     asyncio.run(example_usage())

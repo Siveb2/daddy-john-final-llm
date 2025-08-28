@@ -7,14 +7,10 @@ import hashlib
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, timedelta
 from enum import Enum
-import psutil
 from collections import defaultdict, deque
 import threading
 from contextlib import asynccontextmanager
 from concurrent.futures import ThreadPoolExecutor
-import numpy as np
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
 from sqlalchemy.orm import Session
 
 # --- Enhanced Logging Setup ---
@@ -46,30 +42,15 @@ class ConversationPhase(Enum):
     ARCHIVED = "archived"
 
 class CacheManager:
-    """Advanced caching system with Redis fallback to memory."""
-    def __init__(self, redis_url: Optional[str] = None, default_ttl: int = 3600):
+    """Simple memory-based caching system."""
+    def __init__(self, default_ttl: int = 3600):
         self.default_ttl = default_ttl
         self.memory_cache = {}
         self.cache_hits = 0
         self.cache_misses = 0
-        self.redis_client = None
-        if redis_url:
-            try:
-                import redis
-                self.redis_client = redis.from_url(redis_url, decode_responses=True)
-                self.redis_client.ping()
-                logger.info("Connected to Redis cache")
-            except Exception as e:
-                logger.warning(f"Redis connection failed, using memory cache: {e}")
 
     async def get(self, key: str) -> Optional[Any]:
-        # Implementation remains the same...
         try:
-            if self.redis_client:
-                value = self.redis_client.get(key)
-                if value:
-                    self.cache_hits += 1
-                    return json.loads(value)
             if key in self.memory_cache:
                 item = self.memory_cache[key]
                 if item['expires'] > time.time():
@@ -85,11 +66,8 @@ class CacheManager:
             return None
 
     async def set(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
-        # Implementation remains the same...
         try:
             ttl = ttl or self.default_ttl
-            if self.redis_client:
-                return self.redis_client.setex(key, ttl, json.dumps(value))
             self.memory_cache[key] = {'value': value, 'expires': time.time() + ttl}
             return True
         except Exception as e:
@@ -97,18 +75,16 @@ class CacheManager:
             return False
 
     def get_stats(self) -> Dict[str, Any]:
-        # Implementation remains the same...
         total_requests = self.cache_hits + self.cache_misses
         hit_rate = (self.cache_hits / total_requests * 100) if total_requests > 0 else 0
         return {
             'hits': self.cache_hits, 'misses': self.cache_misses,
             'hit_rate_percent': round(hit_rate, 2),
-            'memory_cache_size': len(self.memory_cache),
-            'redis_connected': self.redis_client is not None
+            'memory_cache_size': len(self.memory_cache)
         }
 
 class PerformanceMonitor:
-    """Advanced performance monitoring and metrics."""
+    """Simple performance monitoring."""
     def __init__(self, window_size: int = 1000):
         self.response_times = deque(maxlen=window_size)
         self.error_count = 0
@@ -119,7 +95,6 @@ class PerformanceMonitor:
 
     @asynccontextmanager
     async def measure_request(self):
-        # Implementation remains the same...
         start_time = time.time()
         with self.lock:
             self.concurrent_requests += 1
@@ -137,7 +112,6 @@ class PerformanceMonitor:
                 self.concurrent_requests -= 1
 
     def get_metrics(self) -> Dict[str, Any]:
-        # Implementation remains the same...
         with self.lock:
             response_times_list = list(self.response_times)
         uptime = time.time() - self.start_time
@@ -149,42 +123,58 @@ class PerformanceMonitor:
             'concurrent_requests': self.concurrent_requests,
         }
         if response_times_list:
+            avg_time = sum(response_times_list) / len(response_times_list)
+            sorted_times = sorted(response_times_list)
+            p95_index = int(len(sorted_times) * 0.95)
+            p95_time = sorted_times[p95_index] if sorted_times else 0
+            
             metrics.update({
-                'avg_response_time_ms': round(np.mean(response_times_list) * 1000, 2),
-                'p95_response_time_ms': round(np.percentile(response_times_list, 95) * 1000, 2),
+                'avg_response_time_ms': round(avg_time * 1000, 2),
+                'p95_response_time_ms': round(p95_time * 1000, 2),
             })
         return metrics
 
 class ConversationStateManager:
-    # This class remains unchanged as it works on the logic of the messages, not their storage.
     def __init__(self):
         self.conversation_states = {}
+        
     def analyze_conversation_phase(self, messages: List[Any]) -> ConversationPhase:
-        if not messages: return ConversationPhase.GREETING
+        if not messages: 
+            return ConversationPhase.GREETING
         message_content = " ".join([msg.content for msg in messages[-5:]])
         content_lower = message_content.lower()
-        if any(kw in content_lower for kw in ['help', 'problem', 'issue']): return ConversationPhase.PROBLEM_SOLVING
-        if any(kw in content_lower for kw in ['hello', 'hi', 'hey']) and len(messages) <= 2: return ConversationPhase.GREETING
+        if any(kw in content_lower for kw in ['help', 'problem', 'issue']): 
+            return ConversationPhase.PROBLEM_SOLVING
+        if any(kw in content_lower for kw in ['hello', 'hi', 'hey']) and len(messages) <= 2: 
+            return ConversationPhase.GREETING
         return ConversationPhase.INFORMATION_GATHERING
+        
     def update_conversation_state(self, conversation_id: str, messages: List[Any]) -> Dict[str, Any]:
         current_phase = self.analyze_conversation_phase(messages)
         self.conversation_states[conversation_id] = {'phase': current_phase}
         return self.conversation_states[conversation_id]
+        
     def get_conversation_insights(self, conversation_id: str) -> Dict[str, Any]:
         return self.conversation_states.get(conversation_id, {'error': 'State not found'})
 
 class PersonaConsistencyChecker:
-    # This class also remains unchanged.
     def __init__(self):
-        self.vectorizer = TfidfVectorizer(max_features=1000, stop_words='english')
+        pass
+        
     def analyze_persona_consistency(self, persona_content: str, responses: List[str]) -> Dict[str, Any]:
-        if not responses: return {'consistency_score': 1.0}
+        # Simple consistency check without sklearn
+        if not responses: 
+            return {'consistency_score': 1.0}
         try:
-            all_texts = [persona_content] + responses
-            tfidf_matrix = self.vectorizer.fit_transform(all_texts)
-            similarities = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:])
-            score = float(np.mean(similarities))
-            return {'consistency_score': round(score, 3)}
+            # Basic keyword matching approach
+            persona_words = set(persona_content.lower().split())
+            response_words = set()
+            for response in responses:
+                response_words.update(response.lower().split())
+            
+            common_words = persona_words.intersection(response_words)
+            score = len(common_words) / max(len(persona_words), 1)
+            return {'consistency_score': round(min(score, 1.0), 3)}
         except Exception as e:
             logger.error(f"Persona consistency analysis error: {e}")
             return {'consistency_score': 0.0, 'error': str(e)}
@@ -193,7 +183,6 @@ class ConversationArchiver:
     """Handles conversation archival and cleanup."""
     async def cleanup_old_conversations(self, db: Session, max_age_days: int = 7) -> Dict[str, Any]:
         logger.info("Executing database cleanup/archival task...")
-        # Placeholder for a real database archival process.
         return {'cleaned_conversations': 0, 'status': 'Placeholder execution.'}
 
 class EnhancedMessageProcessor:
@@ -242,7 +231,7 @@ class EnhancedMessageProcessor:
                 if self.context_manager.should_summarize(db_session, conversation_id):
                     messages_to_summarize = self.context_manager.get_messages_for_summarization(db_session, conversation_id)
                     if messages_to_summarize:
-                        summary_text = "Summary of previous messages." # Placeholder for actual summarization call
+                        summary_text = "Summary of previous messages."
                         summary = ConversationSummary(summary_text=summary_text, message_range=(0,0))
                         self.context_manager.add_summary(db_session, conversation_id, summary)
                         summary_created = True
@@ -275,6 +264,7 @@ class HealthChecker:
     """Comprehensive health checking system."""
     def __init__(self, engine):
         self.engine = engine
+        
     async def run_comprehensive_health_check(self, db: Session) -> Dict[str, Any]:
         start_time = time.time()
         health_status = {'timestamp': datetime.now().isoformat(), 'overall_status': 'healthy', 'components': {}, 'issues': []}
@@ -286,18 +276,19 @@ class HealthChecker:
             health_status['issues'].append("LLM Provider Error")
         
         health_status['metrics'] = self.engine.get_system_metrics(db)
-        if health_status['issues']: health_status['overall_status'] = 'unhealthy'
+        if health_status['issues']: 
+            health_status['overall_status'] = 'unhealthy'
         health_status['check_duration_ms'] = round((time.time() - start_time) * 1000, 2)
         return health_status
 
 class EnhancedChatbotEngine:
     """Enhanced chatbot engine integrating all features."""
-    def __init__(self, openai_api_key: str, persona_file_path: str, redis_url: Optional[str]):
+    def __init__(self, openai_api_key: str, persona_file_path: str, redis_url: Optional[str] = None):
         from app.core.chatbot_core import OpenAIProvider, PersonaManager, ContextManager
         self.llm_provider = OpenAIProvider(openai_api_key)
         self.persona_manager = PersonaManager(persona_file_path)
         self.context_manager = ContextManager()
-        self.cache_manager = CacheManager(redis_url)
+        self.cache_manager = CacheManager()
         self.performance_monitor = PerformanceMonitor()
         self.message_processor = EnhancedMessageProcessor(
             self.llm_provider, self.persona_manager, self.context_manager,
@@ -325,33 +316,12 @@ class EnhancedChatbotEngine:
 
 class ProductionChatbotEngine(EnhancedChatbotEngine):
     """Production-ready engine with background tasks."""
-    def __init__(self, openai_api_key: str, persona_file_path: str, redis_url: Optional[str]):
+    def __init__(self, openai_api_key: str, persona_file_path: str, redis_url: Optional[str] = None):
         super().__init__(openai_api_key, persona_file_path, redis_url)
         self.health_checker = HealthChecker(self)
         self.background_tasks_running = True
         self.background_tasks = []
-        # self._start_background_tasks()
         logger.info("Production Chatbot Engine initialized with all features")
-
-    # def _start_background_tasks(self):
-    #     """Start background tasks, each managing its own DB session."""
-    #     from app.db.database import SessionLocal
-
-    #     async def periodic_task(task_func, interval_sec):
-    #         while self.background_tasks_running:
-    #             try:
-    #                 with SessionLocal() as db:
-    #                     await task_func(db)
-    #                 await asyncio.sleep(interval_sec)
-    #             except Exception as e:
-    #                 logger.error(f"Background task {task_func.__name__} error: {e}", exc_info=True)
-    #                 await asyncio.sleep(60) # Wait a minute before retrying on error
-
-    #     self.background_tasks = [
-    #         asyncio.create_task(periodic_task(self.health_checker.run_comprehensive_health_check, 300)),
-    #         asyncio.create_task(periodic_task(self.run_maintenance, 3600))
-    #     ]
-    #     logger.info("Background tasks for health checks and maintenance have started.")
 
     async def get_comprehensive_status(self) -> Dict[str, Any]:
         from app.db.database import SessionLocal
