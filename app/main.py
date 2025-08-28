@@ -8,7 +8,6 @@ from typing import List, Dict, Optional, Any
 from contextlib import asynccontextmanager
 from datetime import datetime
 import sys
-import time
 
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -193,45 +192,28 @@ async def enhanced_chat(
 ):
     try:
         # Ensure conversation exists
-        conversation = crud.get_conversation(db, request.conversation_id)
-        if not conversation:
-            raise HTTPException(status_code=404, detail="Conversation not found")
-        
-        
-        start_time = time.time()
+        crud.get_or_create_conversation(
+            db=db, 
+            conversation_id=request.conversation_id, 
+            user_id="default_user"  # Or get from request/authentication
+        )
         
         if hasattr(engine, 'chat_enhanced'):
-            result = await engine.chat_enhanced(
+            response = await engine.chat_enhanced(
                 db_session=db, 
                 conversation_id=request.conversation_id, 
                 user_input=request.user_input
             )
         else:
-            result = await engine.chat(
+            # Fallback for basic engine
+            response = await engine.chat(
                 db=db, 
                 conversation_id=request.conversation_id, 
                 user_input=request.user_input
             )
-            
-        processing_time_ms = (time.time() - start_time) * 1000
-        
-        # Standardize response format
-        response = {
-            "success": result.get('success', False),
-            "response": result.get('response', ''),
-            "conversation_id": request.conversation_id,
-            "message_count": len(crud.get_conversation_messages(db, request.conversation_id)),
-            "summary_created": result.get('summary_created', False),
-            "processing_time_ms": round(processing_time_ms, 2)
-        }
-        
-        if 'error' in result:
-            response['error'] = result['error']
-            
         return response
-        
     except Exception as e:
-        logger.error(f"Chat error: {str(e)}", exc_info=True)
+        logger.error(f"Chat endpoint error for conversation {request.conversation_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/chat/enhanced/stream")
@@ -240,76 +222,30 @@ async def enhanced_chat_stream(
     engine: ProductionChatbotEngine = Depends(get_engine),
     db: Session = Depends(get_db)
 ):
+    """Streaming chat endpoint."""
     async def generate_stream():
         try:
-            # Ensure conversation exists
-            crud.get_or_create_conversation(
-                db=db, 
-                conversation_id=request.conversation_id, 
-                user_id="default_user"
-            )
-            
-            start_time = time.time()
-            
             if hasattr(engine, 'chat_enhanced'):
-                result = await engine.chat_enhanced(
-                    db_session=db, 
-                    conversation_id=request.conversation_id, 
-                    user_input=request.user_input
-                )
+                result = await engine.chat_enhanced(db_session=db, conversation_id=request.conversation_id, user_input=request.user_input)
             else:
-                result = await engine.chat(
-                    db=db, 
-                    conversation_id=request.conversation_id, 
-                    user_input=request.user_input
-                )
+                result = await engine.chat(db=db, conversation_id=request.conversation_id, user_input=request.user_input)
                 
-            processing_time_ms = (time.time() - start_time) * 1000
-            
-            if result.get('success') and 'response' in result:
-                # Stream response in chunks for better UX
+            if result.get('success') and result.get('response'):
                 response_text = result['response']
-                chunk_size = 20
-                for i in range(0, len(response_text), chunk_size):
-                    chunk = response_text[i:i+chunk_size]
+                # Stream the response in chunks
+                for i in range(0, len(response_text), 50):
+                    chunk = response_text[i:i+50]
                     yield f"data: {json.dumps({'content': chunk, 'done': False})}\n\n"
-                    await asyncio.sleep(0.01)  # Small delay for streaming effect
-                
-                # Send final completion message with metadata
-                yield f"data: {json.dumps({
-                    'content': '',
-                    'done': True,
-                    'metadata': {
-                        'conversation_id': request.conversation_id,
-                        'processing_time_ms': round(processing_time_ms, 2),
-                        'success': True
-                    }
-                })}\n\n"
+                    await asyncio.sleep(0.05)
+                # Send completion signal
+                yield f"data: {json.dumps({'content': '', 'done': True})}\n\n"
             else:
-                error = result.get('error', 'Unknown error')
-                yield f"data: {json.dumps({
-                    'error': str(error),
-                    'done': True,
-                    'success': False
-                })}\n\n"
-                
+                yield f"data: {json.dumps({'error': result.get('error'), 'done': True})}\n\n"
         except Exception as e:
-            logger.error(f"Stream error: {str(e)}", exc_info=True)
-            yield f"data: {json.dumps({
-                'error': str(e),
-                'done': True,
-                'success': False
-            })}\n\n"
+            logger.error(f"Stream error: {e}", exc_info=True)
+            yield f"data: {json.dumps({'error': str(e), 'done': True})}\n\n"
 
-    return StreamingResponse(
-        generate_stream(),
-        media_type="text/event-stream",
-        headers={
-            'Cache-Control': 'no-cache',
-            'Connection': 'keep-alive',
-            'X-Accel-Buffering': 'no'  # Disable buffering for nginx
-        }
-    )
+    return StreamingResponse(generate_stream(), media_type="text/event-stream")
 
 # --- Conversation Management Endpoints ---
 
@@ -579,7 +515,7 @@ async def test_endpoint():
             "database_url_configured": bool(os.getenv("DATABASE_URL")),
             "persona_file_exists": os.path.exists(os.getenv("PERSONA_FILE_PATH", "persona.txt")),
             "debug_info": {
-                "production_engine_type": engine.__class__.__name__ if engine else "None",
+                "production_engine_type": type(production_engine).__name__ if production_engine else "None",
                 "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
                 "platform": sys.platform
             }
