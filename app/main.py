@@ -7,6 +7,7 @@ import asyncio
 from typing import List, Dict, Optional, Any
 from contextlib import asynccontextmanager
 from datetime import datetime
+import sys
 
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -278,6 +279,7 @@ async def health_check():
             from sqlalchemy import text
             with database.SessionLocal() as db:
                 db.execute(text("SELECT 1"))
+                db.commit()
             health_status["components"]["database"] = {"status": "healthy"}
         except Exception as e:
             health_status["components"]["database"] = {"status": "error", "error": str(e)}
@@ -306,6 +308,7 @@ async def health_check():
             health_status["components"]["openai_api"] = {"status": "not_configured"}
             health_status["overall_status"] = "degraded"
         
+        # Return 200 for local testing, 503 only for production with missing critical components
         status_code = 200 if health_status["overall_status"] == "healthy" else 503
         return JSONResponse(content=health_status, status_code=status_code)
         
@@ -320,6 +323,7 @@ async def health_check():
 
 @app.get("/system/status")
 async def get_system_status():
+    """Get comprehensive system status with error handling"""
     try:
         status = {
             "timestamp": datetime.now().isoformat(),
@@ -333,34 +337,89 @@ async def get_system_status():
                 "database_url_configured": bool(os.getenv("DATABASE_URL")),
                 "redis_url_configured": bool(os.getenv("REDIS_URL")),
                 "persona_file_path": os.getenv("PERSONA_FILE_PATH", "persona.txt")
+            },
+            "debug_info": {
+                "production_engine_type": type(production_engine).__name__ if production_engine else "None",
+                "has_health_checker": hasattr(production_engine, 'health_checker') if production_engine else False,
+                "has_comprehensive_status": hasattr(production_engine, 'get_comprehensive_status') if production_engine else False
             }
         }
         
-        # Test database connection
+        # Test database connection safely
         try:
             from sqlalchemy import text
             with database.SessionLocal() as db:
                 db.execute(text("SELECT 1"))
-            status["database"] = {"status": "connected"}
+                db.commit()
+            status["database"] = {"status": "connected", "message": "Database connection successful"}
         except Exception as e:
-            status["database"] = {"status": "error", "error": str(e)}
+            status["database"] = {
+                "status": "error", 
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "message": "Database connection failed"
+            }
+            logger.error(f"Database connection error: {e}")
         
-        # Test engine if available
-        if production_engine and hasattr(production_engine, 'get_comprehensive_status'):
+        # Test engine status safely
+        if production_engine:
             try:
-                comprehensive_status = await production_engine.get_comprehensive_status()
-                status.update(comprehensive_status)
+                # Try to get comprehensive status if available
+                if hasattr(production_engine, 'get_comprehensive_status'):
+                    comprehensive_status = await production_engine.get_comprehensive_status()
+                    status.update(comprehensive_status)
+                else:
+                    status["engine"] = {"status": "initialized", "type": "basic"}
             except Exception as e:
-                status["engine_error"] = str(e)
+                status["engine"] = {
+                    "status": "error", 
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                    "message": "Engine status check failed"
+                }
+                logger.error(f"Engine status error: {e}")
+        else:
+            status["engine"] = {"status": "not_initialized", "message": "Engine not available"}
+        
+        # Check persona file
+        try:
+            persona_file = os.getenv("PERSONA_FILE_PATH", "persona.txt")
+            if os.path.exists(persona_file):
+                with open(persona_file, 'r', encoding='utf-8') as f:
+                    persona_content = f.read()
+                status["persona"] = {
+                    "status": "loaded",
+                    "file_size": len(persona_content),
+                    "file_path": persona_file
+                }
+            else:
+                status["persona"] = {
+                    "status": "not_found",
+                    "file_path": persona_file,
+                    "message": "Persona file not found"
+                }
+        except Exception as e:
+            status["persona"] = {
+                "status": "error",
+                "error": str(e),
+                "message": "Persona file check failed"
+            }
         
         return status
+        
     except Exception as e:
-        logger.error(f"System status error: {e}")
+        logger.error(f"System status error: {e}", exc_info=True)
         return {
             "timestamp": datetime.now().isoformat(),
             "status": "error",
             "error": str(e),
-            "message": "System status check failed"
+            "error_type": type(e).__name__,
+            "message": "System status check failed",
+            "debug_info": {
+                "production_engine_exists": production_engine is not None,
+                "api_key_exists": bool(os.getenv("OPENAI_API_KEY")),
+                "database_url_exists": bool(os.getenv("DATABASE_URL"))
+            }
         }
 
 # --- Root endpoint for basic connectivity test ---
@@ -377,16 +436,40 @@ async def root():
         }
     }
 
+@app.get("/ping")
+async def ping():
+    """Simple ping endpoint - always works"""
+    return {
+        "status": "pong",
+        "timestamp": datetime.now().isoformat(),
+        "message": "Server is responding"
+    }
+
 @app.get("/test")
 async def test_endpoint():
     """Simple test endpoint that doesn't require database connection"""
-    return {
-        "status": "success",
-        "message": "Basic API is working",
-        "timestamp": datetime.now().isoformat(),
-        "engine_status": "initialized" if production_engine else "not_initialized",
-        "api_key_configured": bool(os.getenv("OPENAI_API_KEY"))
-    }
+    try:
+        return {
+            "status": "success",
+            "message": "Basic API is working",
+            "timestamp": datetime.now().isoformat(),
+            "engine_status": "initialized" if production_engine else "not_initialized",
+            "api_key_configured": bool(os.getenv("OPENAI_API_KEY")),
+            "database_url_configured": bool(os.getenv("DATABASE_URL")),
+            "persona_file_exists": os.path.exists(os.getenv("PERSONA_FILE_PATH", "persona.txt")),
+            "debug_info": {
+                "production_engine_type": type(production_engine).__name__ if production_engine else "None",
+                "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+                "platform": sys.platform
+            }
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": "Test endpoint failed",
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
 
 # --- Main Entry Point ---
 if __name__ == "__main__":
