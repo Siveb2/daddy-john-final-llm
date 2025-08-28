@@ -321,9 +321,9 @@ class ChatbotEngine:
         
         logger.info("Chatbot engine initialized successfully")
     
-    async def chat(self, conversation_id: str, user_input: str) -> Dict:
-        """Main chat interface"""
-        return await self.message_processor.process_message(conversation_id, user_input)
+    async def chat(self, db: Session, conversation_id: str, user_input: str) -> Dict:
+        """Main chat interface with database session"""
+        return await self.message_processor.process_message(db, conversation_id, user_input)
     
     def create_conversation(self, conversation_id: str) -> Dict:
         """Create a new conversation"""
@@ -332,9 +332,9 @@ class ChatbotEngine:
             'conversation_id': conversation_id
         }
     
-    def get_conversation_history(self, conversation_id: str) -> Dict:
-        """Get conversation history"""
-        history = self.context_manager.get_conversation_history(conversation_id)
+    def get_conversation_history(self, db: Session, conversation_id: str) -> Dict:
+        """Get conversation history with database session"""
+        history = self.context_manager.get_conversation_history(db, conversation_id)
         return {
             'success': True,
             'history': [msg.to_dict() for msg in history],
@@ -355,9 +355,9 @@ class ChatbotEngine:
                 'error': str(e)
             }
     
-    def get_conversation_summaries(self, conversation_id: str) -> Dict:
-        """Get all summaries for a conversation"""
-        summaries = self.context_manager.get_latest_summary(conversation_id)
+    def get_conversation_summaries(self, db: Session, conversation_id: str) -> Dict:
+        """Get all summaries for a conversation with database session"""
+        summaries = self.context_manager.get_latest_summary(db, conversation_id)
         return {
             'success': True,
             'summaries': [
@@ -386,7 +386,7 @@ async def example_usage():
     print(f"Conversation created: {result}")
     
     for i in range(25):  
-        response = await engine.chat(conversation_id, f"This is message {i+1}")
+        response = await engine.chat(conversation_id, user_input=f"This is message {i+1}")
         print(f"Response {i+1}: {response}")
         
     history = engine.get_conversation_history(conversation_id)

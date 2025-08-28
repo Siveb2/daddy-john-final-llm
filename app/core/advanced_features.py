@@ -323,6 +323,10 @@ class ProductionChatbotEngine(EnhancedChatbotEngine):
         self.background_tasks = []
         logger.info("Production Chatbot Engine initialized with all features")
 
+    async def chat(self, db: Session, conversation_id: str, user_input: str) -> Dict[str, Any]:
+        """Main chat interface with database session - compatibility method"""
+        return await self.chat_enhanced(db_session=db, conversation_id=conversation_id, user_input=user_input)
+
     async def get_comprehensive_status(self) -> Dict[str, Any]:
         from app.db.database import SessionLocal
         with SessionLocal() as db:

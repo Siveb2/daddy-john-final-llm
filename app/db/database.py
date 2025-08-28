@@ -11,11 +11,9 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     DATABASE_URL = "sqlite:///./chatbot.db"
 else:
-    # Convert postgres:// to postgresql+asyncpg:// for asyncpg compatibility
+    # Convert postgres:// to postgresql:// for psycopg2 compatibility
     if DATABASE_URL.startswith("postgres://"):
-        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+asyncpg://", 1)
-    elif DATABASE_URL.startswith("postgresql://"):
-        DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
 # Create engine with appropriate settings
 if DATABASE_URL.startswith("sqlite"):
@@ -25,7 +23,7 @@ if DATABASE_URL.startswith("sqlite"):
         echo=False
     )
 else:
-    # PostgreSQL/Supabase configuration with asyncpg
+    # PostgreSQL/Supabase configuration with psycopg2
     engine = create_engine(DATABASE_URL, echo=False)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

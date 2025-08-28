@@ -9,10 +9,15 @@
   "routes": [
     {
       "src": "/(.*)",
-      "dest": "app/main.py"
+      "dest": "/app/main.py"
     }
   ],
   "env": {
-    "PYTHONPATH": "/var/task"
+    "PYTHONPATH": "."
+  },
+  "functions": {
+    "app/main.py": {
+      "maxDuration": 30
+    }
   }
 }

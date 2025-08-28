@@ -158,15 +158,18 @@ async def enhanced_chat_stream(
                 
             if result.get('success') and result.get('response'):
                 response_text = result['response']
-                for i in range(0, len(response_text), 10):
-                    chunk = response_text[i:i+10]
-                    yield f"data: {json.dumps({'content': chunk})}\n\n"
-                    await asyncio.sleep(0.02)
+                # Stream the response in chunks
+                for i in range(0, len(response_text), 50):
+                    chunk = response_text[i:i+50]
+                    yield f"data: {json.dumps({'content': chunk, 'done': False})}\n\n"
+                    await asyncio.sleep(0.05)
+                # Send completion signal
+                yield f"data: {json.dumps({'content': '', 'done': True})}\n\n"
             else:
-                 yield f"data: {json.dumps({'error': result.get('error')})}\n\n"
+                yield f"data: {json.dumps({'error': result.get('error'), 'done': True})}\n\n"
         except Exception as e:
             logger.error(f"Stream error: {e}", exc_info=True)
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            yield f"data: {json.dumps({'error': str(e), 'done': True})}\n\n"
 
     return StreamingResponse(generate_stream(), media_type="text/event-stream")
 
