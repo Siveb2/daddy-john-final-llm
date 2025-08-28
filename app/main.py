@@ -55,42 +55,50 @@ async def lifespan(app: FastAPI):
             logger.info("✅ Database tables initialized successfully")
         except Exception as e:
             logger.error(f"Database initialization error: {e}")
-            # Continue without failing - database might not be available
         
         api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            logger.warning("OPENAI_API_KEY not found - running in demo mode")
-            # Don't fail, just log warning
-        
-        redis_url = os.getenv("REDIS_URL")
         persona_file = os.getenv("PERSONA_FILE_PATH", "persona.txt")
+        redis_url = os.getenv("REDIS_URL")
         
         # Initialize with fallback for missing API key
         if api_key:
             try:
-                production_engine = ProductionChatbotEngine(
-                    openai_api_key=api_key,
-                    persona_file_path=persona_file,
-                    redis_url=redis_url
-                )
-                logger.info("✅ Enhanced Chatbot Engine initialized successfully")
-            except Exception as e:
-                logger.error(f"Engine initialization error: {e}")
+                if ADVANCED_FEATURES_AVAILABLE:
+                    production_engine = ProductionChatbotEngine(
+                        openai_api_key=api_key,
+                        persona_file_path=persona_file,
+                        redis_url=redis_url
+                    )
+                    logger.info("✅ Advanced Production Chatbot Engine initialized")
+                else:
+                    # Use basic engine with correct parameters
+                    from app.core.chatbot_core import ChatbotEngine
+                    production_engine = ChatbotEngine(
+                        openai_api_key=api_key,
+                        persona_file_path=persona_file
+                    )
+                    logger.info("✅ Basic Chatbot Engine initialized")
+            except Exception as engine_error:
+                logger.error(f"Engine initialization failed: {engine_error}")
                 # Try to initialize basic engine as fallback
                 try:
                     from app.core.chatbot_core import ChatbotEngine
-                    production_engine = ChatbotEngine(api_key, persona_file)
+                    production_engine = ChatbotEngine(
+                        openai_api_key=api_key,
+                        persona_file_path=persona_file
+                    )
                     logger.info("✅ Basic Chatbot Engine initialized as fallback")
                 except Exception as fallback_error:
                     logger.error(f"Fallback engine initialization failed: {fallback_error}")
                     production_engine = None
         else:
-            logger.info("⚠️ Running without OpenAI API key - limited functionality")
+            logger.warning("⚠️ OPENAI_API_KEY not found - engine will not be initialized")
+            production_engine = None
             
     except Exception as e:
-        logger.error(f"Error during initialization: {e}")
-        # Don't raise - allow server to start even with initialization issues
-    
+        logger.error(f"Critical startup error: {e}")
+        production_engine = None
+
     yield
     
     logger.info("🔄 Shutting down server...")
