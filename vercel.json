@@ -14,10 +14,5 @@
   ],
   "env": {
     "PYTHONPATH": "/var/task"
-  },
-  "functions": {
-    "app/main.py": {
-      "maxDuration": 30
-    }
   }
 }
