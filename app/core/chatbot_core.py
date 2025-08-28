@@ -5,7 +5,6 @@ import logging
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass, asdict
 from datetime import datetime
-import tiktoken
 import openai
 from openai import OpenAI
 import asyncio
@@ -62,7 +61,6 @@ class OpenAIProvider(LLMProvider):
             api_key=api_key,
             base_url="https://openrouter.ai/api/v1" 
         )
-        self.encoding = tiktoken.get_encoding("cl100k_base")
 
     async def generate_response(self, messages: List[Dict], max_tokens: int = 1000) -> str:
         """Generate response using OpenAI API with simple retry logic"""
@@ -96,8 +94,8 @@ class OpenAIProvider(LLMProvider):
                 raise
     
     def count_tokens(self, text: str) -> int:
-        """Count tokens in text"""
-        return len(self.encoding.encode(text))
+        """Simple token estimation: ~4 characters per token"""
+        return len(text) // 4
     
     def count_messages_tokens(self, messages: List[Dict]) -> int:
         """Count total tokens in messages"""
